@@ -232,6 +232,71 @@ const char index_html[] PROGMEM = R"rawliteral(
       background: #666;
       cursor: not-allowed;
     }
+
+    .servo-row {
+      display: grid;
+      grid-template-columns: 52px 1fr 42px 42px 42px;
+      gap: 8px;
+      align-items: center;
+      margin: 10px 0;
+      font-size: 12px;
+      color: #aaa;
+    }
+    .servo-row input[type="range"] {
+      width: 100%;
+      height: 6px;
+      background: #333;
+      border-radius: 5px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .servo-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      background: var(--content-color);
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 2px 6px var(--content-color-glow);
+    }
+    .servo-row input[type="range"]::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      background: var(--content-color);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 2px 6px var(--content-color-glow);
+    }
+    .servo-row button {
+      padding: 8px 4px;
+      min-height: 34px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+    .servo-value {
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+    }
+    .btn-center-all {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      font-size: 15px;
+      background: linear-gradient(145deg, var(--content-color), var(--content-color-dark));
+      color: #fff;
+    }
+    .pin-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .pin-field label {
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 4px;
+    }
     
     /* Gamepad Status */
     .gamepad-status {
@@ -416,6 +481,69 @@ const char index_html[] PROGMEM = R"rawliteral(
           <div id="gamepadStatus" class="gamepad-status">Gamepad disconnected</div>
         </div>
       </div>
+
+      <!-- Individual Servo Control Section -->
+      <div class="section">
+        <div class="section-title">Individual Servo Control</div>
+        <div class="lock-indicator" id="mainLockIndicator">Locked during animations</div>
+        <div class="servo-row">
+          <span>S0 R1 <span class="servo-value" id="s1val">90&deg;</span></span>
+          <input type="range" id="servo1" min="0" max="180" value="90" oninput="updateMotor(1, this.value)">
+          <button onclick="stepMotor(1, -10)">-10</button>
+          <button onclick="updateMotor(1, 90)">90</button>
+          <button onclick="stepMotor(1, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S1 R2 <span class="servo-value" id="s2val">90&deg;</span></span>
+          <input type="range" id="servo2" min="0" max="180" value="90" oninput="updateMotor(2, this.value)">
+          <button onclick="stepMotor(2, -10)">-10</button>
+          <button onclick="updateMotor(2, 90)">90</button>
+          <button onclick="stepMotor(2, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S2 L1 <span class="servo-value" id="s3val">90&deg;</span></span>
+          <input type="range" id="servo3" min="0" max="180" value="90" oninput="updateMotor(3, this.value)">
+          <button onclick="stepMotor(3, -10)">-10</button>
+          <button onclick="updateMotor(3, 90)">90</button>
+          <button onclick="stepMotor(3, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S3 L2 <span class="servo-value" id="s4val">90&deg;</span></span>
+          <input type="range" id="servo4" min="0" max="180" value="90" oninput="updateMotor(4, this.value)">
+          <button onclick="stepMotor(4, -10)">-10</button>
+          <button onclick="updateMotor(4, 90)">90</button>
+          <button onclick="stepMotor(4, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S4 R4 <span class="servo-value" id="s5val">90&deg;</span></span>
+          <input type="range" id="servo5" min="0" max="180" value="90" oninput="updateMotor(5, this.value)">
+          <button onclick="stepMotor(5, -10)">-10</button>
+          <button onclick="updateMotor(5, 90)">90</button>
+          <button onclick="stepMotor(5, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S5 R3 <span class="servo-value" id="s6val">90&deg;</span></span>
+          <input type="range" id="servo6" min="0" max="180" value="90" oninput="updateMotor(6, this.value)">
+          <button onclick="stepMotor(6, -10)">-10</button>
+          <button onclick="updateMotor(6, 90)">90</button>
+          <button onclick="stepMotor(6, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S6 L3 <span class="servo-value" id="s7val">90&deg;</span></span>
+          <input type="range" id="servo7" min="0" max="180" value="90" oninput="updateMotor(7, this.value)">
+          <button onclick="stepMotor(7, -10)">-10</button>
+          <button onclick="updateMotor(7, 90)">90</button>
+          <button onclick="stepMotor(7, 10)">+10</button>
+        </div>
+        <div class="servo-row">
+          <span>S7 L4 <span class="servo-value" id="s8val">90&deg;</span></span>
+          <input type="range" id="servo8" min="0" max="180" value="90" oninput="updateMotor(8, this.value)">
+          <button onclick="stepMotor(8, -10)">-10</button>
+          <button onclick="updateMotor(8, 90)">90</button>
+          <button onclick="stepMotor(8, 10)">+10</button>
+        </div>
+        <button class="btn-center-all" onclick="centerAllMotors()">Center All to 90&deg;</button>
+      </div>
     </div>
   </div>
 
@@ -441,6 +569,44 @@ const char index_html[] PROGMEM = R"rawliteral(
           <option value="medium" selected>Medium</option>
           <option value="fast">Fast</option>
         </select>
+      </div>
+
+      <div class="settings-section">
+        <h4>Servo Pins</h4>
+        <div class="pin-grid">
+          <div class="pin-field">
+            <label>S0 / R1 GPIO</label>
+            <input type="number" id="pin1" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S1 / R2 GPIO</label>
+            <input type="number" id="pin2" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S2 / L1 GPIO</label>
+            <input type="number" id="pin3" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S3 / L2 GPIO</label>
+            <input type="number" id="pin4" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S4 / R4 GPIO</label>
+            <input type="number" id="pin5" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S5 / R3 GPIO</label>
+            <input type="number" id="pin6" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S6 / L3 GPIO</label>
+            <input type="number" id="pin7" min="0" max="48" step="1">
+          </div>
+          <div class="pin-field">
+            <label>S7 / L4 GPIO</label>
+            <input type="number" id="pin8" min="0" max="48" step="1">
+          </div>
+        </div>
       </div>
 
       <div class="settings-section">
@@ -585,16 +751,22 @@ function incrementQueue() {
 function lockMotors(duration = 3000) {
   motorsLocked = true;
   document.getElementById('lockIndicator').classList.add('active');
+  document.getElementById('mainLockIndicator').classList.add('active');
   for (let i = 1; i <= 8; i++) {
     const slider = document.getElementById('motor' + i);
     if (slider) slider.disabled = true;
+    const mainSlider = document.getElementById('servo' + i);
+    if (mainSlider) mainSlider.disabled = true;
   }
   setTimeout(() => {
     motorsLocked = false;
     document.getElementById('lockIndicator').classList.remove('active');
+    document.getElementById('mainLockIndicator').classList.remove('active');
     for (let i = 1; i <= 8; i++) {
       const slider = document.getElementById('motor' + i);
       if (slider) slider.disabled = false;
+      const mainSlider = document.getElementById('servo' + i);
+      if (mainSlider) mainSlider.disabled = false;
     }
   }, duration);
 }
@@ -620,10 +792,28 @@ function pose(name) {
 
 function updateMotor(motorNum, value) {
   if (motorsLocked) return;
-  document.getElementById('m' + motorNum + 'val').textContent = value + '\u00B0';
-  if (!canSendCommand()) return;
-  incrementQueue();
+  value = Math.max(0, Math.min(180, Number(value)));
+  const modalValue = document.getElementById('m' + motorNum + 'val');
+  const mainValue = document.getElementById('s' + motorNum + 'val');
+  const modalSlider = document.getElementById('motor' + motorNum);
+  const mainSlider = document.getElementById('servo' + motorNum);
+  if (modalValue) modalValue.textContent = value + '\u00B0';
+  if (mainValue) mainValue.textContent = value + '\u00B0';
+  if (modalSlider) modalSlider.value = value;
+  if (mainSlider) mainSlider.value = value;
   fetch('/cmd?motor=' + motorNum + '&value=' + value).catch(console.log);
+}
+
+function stepMotor(motorNum, delta) {
+  const slider = document.getElementById('servo' + motorNum) || document.getElementById('motor' + motorNum);
+  const current = slider ? Number(slider.value) : 90;
+  updateMotor(motorNum, current + delta);
+}
+
+function centerAllMotors() {
+  for (let i = 1; i <= 8; i++) {
+    updateMotor(i, 90);
+  }
 }
 
 function openSettings() {
@@ -632,6 +822,11 @@ function openSettings() {
     document.getElementById('walkCycles').value = data.walkCycles || 10;
     document.getElementById('motorCurrentDelay').value = data.motorCurrentDelay || 20;
     document.getElementById('motorSpeed').value = data.motorSpeed || 'medium';
+    const defaultPins = [4, 5, 6, 7, 35, 36, 37, 38];
+    const pins = Array.isArray(data.servoPins) ? data.servoPins : defaultPins;
+    for (let i = 1; i <= 8; i++) {
+      document.getElementById('pin' + i).value = pins[i - 1] ?? defaultPins[i - 1];
+    }
     
     // Load theme settings
     const savedColor = localStorage.getItem('themeColor') || '#ff8c42';
@@ -660,6 +855,9 @@ function openSettings() {
     document.getElementById('frameDelay').value = 100;
     document.getElementById('walkCycles').value = 10;
     document.getElementById('motorCurrentDelay').value = 20;
+    [4, 5, 6, 7, 35, 36, 37, 38].forEach((pin, index) => {
+      document.getElementById('pin' + (index + 1)).value = pin;
+    });
     
     const savedColor = localStorage.getItem('themeColor') || '#ff8c42';
     document.getElementById('themeColor').value = savedColor;
@@ -700,6 +898,10 @@ function saveSettings() {
   const wc = document.getElementById('walkCycles').value;
   const mcd = document.getElementById('motorCurrentDelay').value;
   const ms = document.getElementById('motorSpeed').value;
+  const pinParams = [];
+  for (let i = 1; i <= 8; i++) {
+    pinParams.push(`pin${i}=${document.getElementById('pin' + i).value}`);
+  }
   
   // Save theme color
   const colorSelect = document.getElementById('themeColor');
@@ -708,7 +910,7 @@ function saveSettings() {
   localStorage.setItem('themeColor', themeColor);
   applyTheme(themeColor);
   
-  fetch(`/setSettings?frameDelay=${fd}&walkCycles=${wc}&motorCurrentDelay=${mcd}&motorSpeed=${ms}`)
+  fetch(`/setSettings?frameDelay=${fd}&walkCycles=${wc}&motorCurrentDelay=${mcd}&motorSpeed=${ms}&${pinParams.join('&')}`)
     .then(() => closeSettings())
     .catch(() => closeSettings());
 }
