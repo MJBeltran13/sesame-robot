@@ -1,11 +1,14 @@
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Wire.h>
 #include <ESP32Servo.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SSD1327.h>
 #include "face-bitmaps.h"
 #include "movement-sequences.h"
 #include "captive-portal.h"
@@ -18,18 +21,38 @@
 // --- Station Mode Configuration (Optional) ---
 // Set these to connect to your home/office WiFi network
 // Leave NETWORK_SSID empty to disable station mode
-#define NETWORK_SSID ""  // Your WiFi network name
-#define NETWORK_PASS ""  // Your WiFi password
-#define ENABLE_NETWORK_MODE false  // Set to true to enable network connection attempts
+#define NETWORK_SSID "BatStateU-DevOps"  // Your WiFi network name
+#define NETWORK_PASS "Dev3l$06"  // Your WiFi password
+#define ENABLE_NETWORK_MODE true  // Set to true to enable network connection attempts
+
+// --- Trioe Hub Control Configuration ---
+// Enable this after NETWORK_SSID/PASS are filled in and the robot can reach Trioe Hub.
+#define ENABLE_TRIOE_HUB_CONTROL true
+#define DISABLE_HOTSPOT_WHEN_TRIOE_CONNECTED true
+#define TRIOE_HUB_DATA_URL "https://hub.trioe.dev/api/devices/44123/data/microcontroller/"
+#define TRIOE_HUB_POST_URL "https://hub.trioe.dev/api/devices/44123/data/"
+#define TRIOE_API_KEY "CA17FF35"
+#define TRIOE_COMMAND_STREAM "command"
+#define TRIOE_JOYSTICK_STREAM "joystick"
+#define TRIOE_POLL_INTERVAL_MS 150
+#define TRIOE_HTTP_TIMEOUT_MS 650
+#define TRIOE_ACK_TIMEOUT_MS 900
+#define TRIOE_FAILURE_BACKOFF_MS 2000
+#define TRIOE_JOYSTICK_DEADZONE 35
+#define ENABLE_TRIOE_DEBUG_PRINTS true
+#define ENABLE_TRIOE_POLL_VALUE_PRINTS true
+#define ENABLE_SERVO_DEBUG_PRINTS false
 
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+#define SCREEN_HEIGHT 128
+#define FACE_BITMAP_WIDTH 128
+#define FACE_BITMAP_HEIGHT 128
 #define OLED_RESET -1
 #define OLED_I2C_ADDR 0x3C
 
-// I2C Pins for GM009605
-#define I2C_SDA 21
-#define I2C_SCL 14
+// I2C Pins for SSD1327 OLED
+#define I2C_SDA 47
+#define I2C_SCL 48
 
 // I2C Pins for Distro Board V2 / V3
 //#define I2C_SDA 8
@@ -48,11 +71,16 @@
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_SSD1327 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 WebServer server(80);
+bool displayReady = false;
+uint8_t activeOledAddr = OLED_I2C_ADDR;
+int activeI2cSda = I2C_SDA;
+int activeI2cScl = I2C_SCL;
 
 // Global state for animations
 String currentCommand = "";
+String executingCommand = "";
 String currentFaceName = "default";
 const unsigned char* const* currentFaceFrames = nullptr;
 uint8_t currentFaceFrameCount = 0;
@@ -75,9 +103,23 @@ bool showingWifiInfo = false;
 int wifiScrollPos = 0;
 unsigned long lastWifiScrollMs = 0;
 String wifiInfoText = "";
+unsigned long lastHeartbeatMs = 0;
+unsigned long lastTrioePollMs = 0;
+unsigned long trioePollBackoffUntilMs = 0;
+unsigned long lastTrioePollErrorPrintMs = 0;
+int lastTrioePollErrorStatus = 0;
+unsigned long lastNetworkRetryMs = 0;
+String lastTrioeCommandValue = "";
+String lastTrioeCommandUpdateToken = "";
+String lastTrioeDuplicateDebugKey = "";
+String lastTrioeJoystickCommand = "";
+String lastTrioePollDebugSnapshot = "";
+String currentCommandUpdateToken = "";
+bool trioePollInProgress = false;
 
 // Network Mode
 bool networkConnected = false;
+bool localRemoteEnabled = false;
 IPAddress networkIP;
 String deviceHostname = "sesame-robot";
 
@@ -113,9 +155,9 @@ int8_t servoSubtrim[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 
 // Animation constants
-int frameDelay = 100;
+int frameDelay = 60;
 int walkCycles = 10;
-int motorCurrentDelay = 20; // ms delay between motor movements to prevent over-current
+int motorCurrentDelay = 8; // ms delay between motor movements to prevent over-current
 
 struct FaceEntry {
   const char* name;
@@ -193,6 +235,7 @@ const FaceFpsEntry faceFpsEntries[] = {
 // Prototypes
 void setServoAngle(uint8_t channel, int angle);
 void updateFaceBitmap(const unsigned char* bitmap);
+void showWifiSetupScreen();
 void setFace(const String& faceName);
 void setFaceMode(FaceAnimMode mode);
 void setFaceWithMode(const String& faceName, FaceAnimMode mode);
@@ -207,8 +250,23 @@ void handleGetSettings();
 void handleSetSettings();
 void handleGetStatus();
 void handleApiCommand();
+bool beginSsd1327Display();
+void showDisplayBootDiagnostic();
+void pollTrioeHub();
+int trioeHttpGet(const String& url, String& response, uint16_t timeoutMs);
+int trioeHttpPost(const String& url, const String& payload, uint16_t timeoutMs);
+void addTrioeApiHeaders(HTTPClient& http, bool includeJsonContentType = false);
+void applyTrioeCommand(const String& commandValue, const String& updateToken);
+void applyTrioeJoystick(int x, int y);
+void acknowledgeTrioeCommandComplete(const String& command, const String& updateToken);
+String normalizeTrioeCommand(String value);
+bool isSesameCommand(const String& command);
+bool isContinuousMovementCommand(const String& command);
+bool shouldPollTrioeDuringDelays();
 void updateWifiInfoScroll();
 void recordInput();
+void serviceLocalRemote();
+void maintainNetworkConnection();
 
 void handleRoot() {
   server.send(200, "text/html", index_html);
@@ -373,59 +431,127 @@ void handleApiCommand() {
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  randomSeed(micros());
-  
-  // I2C Init for ESP32
-  pinMode(I2C_SDA, INPUT_PULLUP);
-  pinMode(I2C_SCL, INPUT_PULLUP);
-  Wire.begin(I2C_SDA, I2C_SCL);
-  Wire.setClock(100000);
+bool beginSsd1327Display() {
+  struct I2cPins {
+    int sda;
+    int scl;
+  };
 
-  // OLED Init
-  Serial.print(F("OLED I2C SDA: "));
-  Serial.print(I2C_SDA);
-  Serial.print(F(", SCL: "));
-  Serial.println(I2C_SCL);
+  const I2cPins pinCandidates[] = {
+    { I2C_SDA, I2C_SCL },
+    { I2C_SCL, I2C_SDA },
+    { 8, 9 }
+  };
+  const uint8_t addrCandidates[] = { OLED_I2C_ADDR, 0x3C, 0x3D };
 
-  uint8_t oledAddr = OLED_I2C_ADDR;
-  bool oledFound = false;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
+  for (uint8_t p = 0; p < sizeof(pinCandidates) / sizeof(pinCandidates[0]); p++) {
+    bool duplicatePins = false;
+    for (uint8_t previous = 0; previous < p; previous++) {
+      if (pinCandidates[p].sda == pinCandidates[previous].sda &&
+          pinCandidates[p].scl == pinCandidates[previous].scl) {
+        duplicatePins = true;
+        break;
+      }
+    }
+    if (duplicatePins) continue;
+
+    activeI2cSda = pinCandidates[p].sda;
+    activeI2cScl = pinCandidates[p].scl;
+    pinMode(activeI2cSda, INPUT_PULLUP);
+    pinMode(activeI2cScl, INPUT_PULLUP);
+    Wire.end();
+    Wire.begin(activeI2cSda, activeI2cScl);
+    Wire.setClock(100000);
+    Wire.setTimeOut(20);
+
+    Serial.print(F("Trying SSD1327 I2C SDA="));
+    Serial.print(activeI2cSda);
+    Serial.print(F(" SCL="));
+    Serial.println(activeI2cScl);
+
+    for (uint8_t a = 0; a < sizeof(addrCandidates); a++) {
+      uint8_t addr = addrCandidates[a];
+      bool duplicateAddr = false;
+      for (uint8_t previous = 0; previous < a; previous++) {
+        if (addr == addrCandidates[previous]) {
+          duplicateAddr = true;
+          break;
+        }
+      }
+      if (duplicateAddr) continue;
+
+      Wire.beginTransmission(addr);
+      uint8_t error = Wire.endTransmission();
+      if (error != 0) continue;
+
       Serial.print(F("I2C device found at 0x"));
       if (addr < 16) Serial.print("0");
       Serial.println(addr, HEX);
-      if (addr == 0x3C || addr == 0x3D) {
-        oledAddr = addr;
-        oledFound = true;
+
+      activeOledAddr = addr;
+      if (display.begin(activeOledAddr)) {
+        display.invertDisplay(false);
+        display.clearDisplay();
+        display.display();
+        return true;
       }
+
+      Serial.print(F("SSD1327 begin failed at 0x"));
+      if (activeOledAddr < 16) Serial.print("0");
+      Serial.println(activeOledAddr, HEX);
     }
   }
 
-  if (!oledFound) {
-    Serial.println(F("No SSD1306 found at 0x3C or 0x3D. Trying configured address anyway."));
-  }
+  return false;
+}
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, oledAddr)) {
-    Serial.print(F("SSD1306 allocation failed at 0x"));
-    if (oledAddr < 16) Serial.print("0");
-    Serial.println(oledAddr, HEX);
-    while (1);
-  }
+void showDisplayBootDiagnostic() {
+  if (!displayReady) return;
 
-  Serial.print(F("SSD1306 started at 0x"));
-  if (oledAddr < 16) Serial.print("0");
-  Serial.println(oledAddr, HEX);
-  
   display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(SSD1327_WHITE);
   display.setTextSize(1);
-  display.setCursor(0,0);
-  display.println(F("Setting up WiFi..."));
+  display.setCursor(0, 0);
+  display.println(F("SSD1327 OK"));
+  display.print(F("SDA "));
+  display.print(activeI2cSda);
+  display.print(F(" SCL "));
+  display.println(activeI2cScl);
+  display.print(F("ADDR 0x"));
+  if (activeOledAddr < 16) display.print("0");
+  display.println(activeOledAddr, HEX);
+  display.drawRect(0, 34, SCREEN_WIDTH, 58, SSD1327_WHITE);
+  display.drawCircle(64, 64, 20, SSD1327_WHITE);
+  display.fillCircle(64, 64, 6, SSD1327_WHITE);
   display.display();
+  delay(700);
+}
+
+void setup() {
+  Serial.begin(115200);
+  unsigned long serialWaitStart = millis();
+  while (!Serial && millis() - serialWaitStart < 5000) {
+    delay(10);
+  }
+  delay(250);
+  Serial.println(F("Sesame firmware booting."));
+  randomSeed(micros());
+  
+  displayReady = beginSsd1327Display();
+  if (!displayReady) {
+    Serial.println(F("SSD1327 I2C display not found on the configured SDA/SCL pairs. Continuing without OLED."));
+  } else {
+    Serial.print(F("SSD1327 started at 0x"));
+    if (activeOledAddr < 16) Serial.print("0");
+    Serial.print(activeOledAddr, HEX);
+    Serial.print(F(" SDA="));
+    Serial.print(activeI2cSda);
+    Serial.print(F(" SCL="));
+    Serial.println(activeI2cScl);
+
+    showDisplayBootDiagnostic();
+    showWifiSetupScreen();
+  }
 
   // --- WIFI CONFIGURATION ---
   // Try to connect to network first if configured
@@ -459,18 +585,32 @@ void setup() {
     Serial.println("Network mode disabled. Running in AP-only mode.");
   }
   
-  // --- ACCESS POINT CONFIGURATION ---
-  WiFi.softAP(AP_SSID, AP_PASS);
-  IPAddress myIP = WiFi.softAPIP();
-  
-  Serial.print("AP Created. IP: ");
-  Serial.println(myIP);
+  const bool trioeHubConnectedMode = ENABLE_TRIOE_HUB_CONTROL &&
+    DISABLE_HOTSPOT_WHEN_TRIOE_CONNECTED &&
+    networkConnected;
 
-  // Build WiFi info text for scrolling
-  if (networkConnected) {
-    wifiInfoText = "AP: " + String(AP_SSID) + " (" + myIP.toString() + ")  |  Network: " + String(NETWORK_SSID) + " (" + networkIP.toString() + ") or " + deviceHostname + ".local  |  ";
+  if (trioeHubConnectedMode) {
+    localRemoteEnabled = false;
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    wifiInfoText = "Network: " + String(NETWORK_SSID) + " (" + networkIP.toString() + ")  |  Trioe Hub control active  |  ";
+    Serial.println(F("Trioe Hub connected mode: hotspot, captive portal, and local remote disabled."));
   } else {
-    wifiInfoText = "Connect to WiFi: " + String(AP_SSID) + "  |  Pass: " + String(AP_PASS) + "  |  IP: " + myIP.toString() + "  |  Captive Portal will auto-open!  |  ";
+    localRemoteEnabled = true;
+
+    // --- ACCESS POINT CONFIGURATION ---
+    WiFi.softAP(AP_SSID, AP_PASS);
+    IPAddress myIP = WiFi.softAPIP();
+    
+    Serial.print("AP Created. IP: ");
+    Serial.println(myIP);
+
+    // Build WiFi info text for scrolling
+    if (networkConnected) {
+      wifiInfoText = "AP: " + String(AP_SSID) + " (" + myIP.toString() + ")  |  Network: " + String(NETWORK_SSID) + " (" + networkIP.toString() + ") or " + deviceHostname + ".local  |  ";
+    } else {
+      wifiInfoText = "Connect to WiFi: " + String(AP_SSID) + "  |  Pass: " + String(AP_PASS) + "  |  IP: " + myIP.toString() + "  |  Captive Portal will auto-open!  |  ";
+    }
   }
   
   // Initialize input tracking
@@ -478,36 +618,38 @@ void setup() {
   firstInputReceived = false;
   showingWifiInfo = false;
 
-  // Start mDNS responder for local network discovery
-  if (MDNS.begin(deviceHostname.c_str())) {
-    Serial.println("mDNS responder started");
-    Serial.print("Access controller at: http://");
-    Serial.print(deviceHostname);
-    Serial.println(".local");
-    MDNS.addService("http", "tcp", 80);
-  } else {
-    Serial.println("Error setting up mDNS responder!");
+  if (localRemoteEnabled) {
+    // Start mDNS responder for local network discovery
+    if (MDNS.begin(deviceHostname.c_str())) {
+      Serial.println("mDNS responder started");
+      Serial.print("Access controller at: http://");
+      Serial.print(deviceHostname);
+      Serial.println(".local");
+      MDNS.addService("http", "tcp", 80);
+    } else {
+      Serial.println("Error setting up mDNS responder!");
+    }
+
+    // Start DNS Server for Captive Portal
+    // This redirects ALL domain requests to the ESP32's IP
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+    // Web Server Routes
+    server.on("/", handleRoot);
+    server.on("/cmd", handleCommandWeb);
+    server.on("/getSettings", handleGetSettings);
+    server.on("/setSettings", handleSetSettings);
+    
+    // API endpoints for network communication
+    server.on("/api/status", handleGetStatus);
+    server.on("/api/command", handleApiCommand);
+    
+    // Catch-all route for captive portal
+    // This ensures any URL redirects to the controller page
+    server.onNotFound(handleRoot);
+    
+    server.begin();
   }
-
-  // Start DNS Server for Captive Portal
-  // This redirects ALL domain requests to the ESP32's IP
-  dnsServer.start(DNS_PORT, "*", myIP);
-
-  // Web Server Routes
-  server.on("/", handleRoot);
-  server.on("/cmd", handleCommandWeb);
-  server.on("/getSettings", handleGetSettings);
-  server.on("/setSettings", handleSetSettings);
-  
-  // API endpoints for network communication
-  server.on("/api/status", handleGetStatus);
-  server.on("/api/command", handleApiCommand);
-  
-  // Catch-all route for captive portal
-  // This ensures any URL redirects to the controller page
-  server.onNotFound(handleRoot);
-  
-  server.begin();
 
   // PWM Init
   ESP32PWM::allocateTimer(0);
@@ -527,23 +669,37 @@ void setup() {
     setServoAngle(i, 90);
   }
   
-  // Show rest face on startup.
-  setFace("rest");
+  // Show the native 128x128 default face on startup.
+  setFace("default");
   
-  Serial.println(F("HTTP server & Captive Portal started."));
+  if (localRemoteEnabled) {
+    Serial.println(F("HTTP server & Captive Portal started."));
+  } else {
+    Serial.println(F("Local HTTP remote disabled for Trioe Hub control."));
+  }
 }
 
 void loop() {
-  // Process DNS requests for captive portal
-  dnsServer.processNextRequest();
-  
-  server.handleClient();
+  if (millis() - lastHeartbeatMs >= 5000) {
+    lastHeartbeatMs = millis();
+    Serial.println(F("loop alive"));
+  }
+
+  maintainNetworkConnection();
+  serviceLocalRemote();
   updateAnimatedFace();
   updateIdleBlink();
   updateWifiInfoScroll();
+  pollTrioeHub();
 
   if (currentCommand != "") {
     String cmd = currentCommand;
+    String cmdUpdateToken = currentCommandUpdateToken;
+    executingCommand = cmd;
+    if (ENABLE_TRIOE_DEBUG_PRINTS) {
+      Serial.print(F("Executing command: "));
+      Serial.println(cmd);
+    }
     if (cmd == "forward") runWalkPose();
     else if (cmd == "backward") runWalkBackward();
     else if (cmd == "left") runTurnLeft();
@@ -563,6 +719,17 @@ void loop() {
     else if (cmd == "shrug") runShrugPose();
     else if (cmd == "dead") runDeadPose();
     else if (cmd == "crab") runCrabPose();
+    if (ENABLE_TRIOE_DEBUG_PRINTS) {
+      Serial.print(F("Command finished/loop state: requested="));
+      Serial.print(cmd);
+      Serial.print(F(" currentCommand="));
+      Serial.println(currentCommand.length() ? currentCommand : "(empty)");
+    }
+    acknowledgeTrioeCommandComplete(cmd, cmdUpdateToken);
+    executingCommand = "";
+    if (currentCommand.length() == 0) {
+      currentCommandUpdateToken = "";
+    }
   }
   
   // Serial CLI for debugging (can be used to diagnose servo position issues and wiring)
@@ -655,10 +822,66 @@ void loop() {
   }
 }
 
+void drawFaceBitmap(const unsigned char* bitmap) {
+  if (bitmap == nullptr) return;
+  display.drawBitmap(0, 0, bitmap, FACE_BITMAP_WIDTH, FACE_BITMAP_HEIGHT, SSD1327_WHITE);
+}
+
+void drawWifiBlockWord(int x, int y) {
+  const int t = 4;
+  const int h = 30;
+
+  // W
+  display.fillRect(x, y, t, h, SSD1327_WHITE);
+  display.fillRect(x + 24, y, t, h, SSD1327_WHITE);
+  display.fillRect(x + 9, y + 14, t, 16, SSD1327_WHITE);
+  display.fillRect(x + 15, y + 14, t, 16, SSD1327_WHITE);
+  display.fillRect(x + 4, y + 26, 24, t, SSD1327_WHITE);
+  x += 34;
+
+  // I
+  display.fillRect(x, y, 18, t, SSD1327_WHITE);
+  display.fillRect(x + 7, y, t, h, SSD1327_WHITE);
+  display.fillRect(x, y + h - t, 18, t, SSD1327_WHITE);
+  x += 26;
+
+  // F
+  display.fillRect(x, y, t, h, SSD1327_WHITE);
+  display.fillRect(x, y, 22, t, SSD1327_WHITE);
+  display.fillRect(x, y + 13, 18, t, SSD1327_WHITE);
+  x += 30;
+
+  // I
+  display.fillRect(x, y, 18, t, SSD1327_WHITE);
+  display.fillRect(x + 7, y, t, h, SSD1327_WHITE);
+  display.fillRect(x, y + h - t, 18, t, SSD1327_WHITE);
+}
+
+void showWifiSetupScreen() {
+  if (!displayReady) return;
+
+  display.clearDisplay();
+
+  const int cx = 64;
+  const int cy = 58;
+  for (int r = 30; r >= 12; r -= 9) {
+    for (int stroke = 0; stroke < 3; stroke++) {
+      display.drawCircle(cx, cy, r - stroke, SSD1327_WHITE);
+    }
+  }
+  display.fillRect(0, cy + 1, SCREEN_WIDTH, 40, SSD1327_BLACK);
+  display.fillCircle(cx, cy + 6, 4, SSD1327_WHITE);
+
+  drawWifiBlockWord(20, 82);
+
+  display.display();
+}
+
 // Function to update the robot's face
 void updateFaceBitmap(const unsigned char* bitmap) {
+  if (!displayReady) return;
   display.clearDisplay();
-  display.drawBitmap(0, 0, bitmap, 128, 64, SSD1306_WHITE);
+  drawFaceBitmap(bitmap);
   display.display();
 }
 
@@ -768,8 +991,10 @@ void delayWithFace(unsigned long ms) {
   unsigned long start = millis();
   while (millis() - start < ms) {
     updateAnimatedFace();
-    server.handleClient();
-    dnsServer.processNextRequest();
+    if (shouldPollTrioeDuringDelays()) {
+      pollTrioeHub();
+    }
+    serviceLocalRemote();
     delay(5);
   }
 }
@@ -823,6 +1048,18 @@ void updateIdleBlink() {
 void setServoAngle(uint8_t channel, int angle) { 
   if (channel < 8) {
     int adjustedAngle = constrain(angle + servoSubtrim[channel], 0, 180);
+    if (ENABLE_SERVO_DEBUG_PRINTS) {
+      Serial.print(F("Servo write: "));
+      Serial.print(ServoNames[channel]);
+      Serial.print(F(" target="));
+      Serial.print(angle);
+      Serial.print(F(" trim="));
+      Serial.print(servoSubtrim[channel]);
+      Serial.print(F(" adjusted="));
+      Serial.print(adjustedAngle);
+      Serial.print(F(" pin="));
+      Serial.println(servoPins[channel]);
+    }
     servos[channel].write(adjustedAngle);
     delayWithFace(motorCurrentDelay);
   }
@@ -831,8 +1068,8 @@ void setServoAngle(uint8_t channel, int angle) {
 bool pressingCheck(String cmd, int ms) {
   unsigned long start = millis();
   while (millis() - start < ms) {
-    server.handleClient();
-    dnsServer.processNextRequest();
+    pollTrioeHub();
+    serviceLocalRemote();
     updateAnimatedFace();
     if (currentCommand != cmd) {
       runStandPose(1);
@@ -843,6 +1080,356 @@ bool pressingCheck(String cmd, int ms) {
   return true;
 }
 
+void addTrioeApiHeaders(HTTPClient& http, bool includeJsonContentType) {
+  String apiKey = TRIOE_API_KEY;
+  if (apiKey.length() > 0 && apiKey != "YOUR_8_DIGIT_API_KEY") {
+    http.addHeader("X-API-Key", apiKey);
+    http.addHeader("Authorization", "Bearer " + apiKey);
+  }
+  if (includeJsonContentType) {
+    http.addHeader("Content-Type", "application/json");
+  }
+}
+
+int trioeHttpGet(const String& url, String& response, uint16_t timeoutMs) {
+  HTTPClient http;
+  WiFiClient client;
+  WiFiClientSecure secureClient;
+  http.setTimeout(timeoutMs);
+  http.setConnectTimeout(timeoutMs);
+  http.setReuse(false);
+
+  bool httpStarted = false;
+  if (url.startsWith("https://")) {
+    secureClient.setInsecure();
+    secureClient.setTimeout(timeoutMs);
+    httpStarted = http.begin(secureClient, url);
+  } else {
+    client.setTimeout(timeoutMs);
+    httpStarted = http.begin(client, url);
+  }
+
+  if (!httpStarted) return -1000;
+  addTrioeApiHeaders(http);
+
+  int statusCode = http.GET();
+  if (statusCode == HTTP_CODE_OK) {
+    response = http.getString();
+  }
+  http.end();
+  return statusCode;
+}
+
+int trioeHttpPost(const String& url, const String& payload, uint16_t timeoutMs) {
+  HTTPClient http;
+  WiFiClient client;
+  WiFiClientSecure secureClient;
+  http.setTimeout(timeoutMs);
+  http.setConnectTimeout(timeoutMs);
+  http.setReuse(false);
+
+  bool httpStarted = false;
+  if (url.startsWith("https://")) {
+    secureClient.setInsecure();
+    secureClient.setTimeout(timeoutMs);
+    httpStarted = http.begin(secureClient, url);
+  } else {
+    client.setTimeout(timeoutMs);
+    httpStarted = http.begin(client, url);
+  }
+
+  if (!httpStarted) return -1000;
+  addTrioeApiHeaders(http, true);
+
+  int statusCode = http.POST(payload);
+  http.end();
+  return statusCode;
+}
+
+void pollTrioeHub() {
+  if (!ENABLE_TRIOE_HUB_CONTROL || !networkConnected || WiFi.status() != WL_CONNECTED) return;
+  if (!shouldPollTrioeDuringDelays()) return;
+  if (trioePollInProgress) return;
+
+  unsigned long now = millis();
+  if (now < trioePollBackoffUntilMs) return;
+  if (now - lastTrioePollMs < TRIOE_POLL_INTERVAL_MS) return;
+  lastTrioePollMs = now;
+  trioePollInProgress = true;
+  unsigned long pollStartMs = millis();
+
+  String payload = "";
+  int statusCode = trioeHttpGet(TRIOE_HUB_DATA_URL, payload, TRIOE_HTTP_TIMEOUT_MS);
+
+  if (statusCode == HTTP_CODE_OK) {
+    trioePollBackoffUntilMs = 0;
+    lastTrioePollErrorStatus = 0;
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      Serial.print(F("Trioe JSON parse failed: "));
+      Serial.println(error.c_str());
+      trioePollInProgress = false;
+      return;
+    }
+
+    String commandValue = "";
+    String commandNonceStream = String(TRIOE_COMMAND_STREAM) + "_nonce";
+    String commandAckStream = String(TRIOE_COMMAND_STREAM) + "_ack";
+    String commandAckNonceStream = String(TRIOE_COMMAND_STREAM) + "_ack_nonce";
+    String joystickBase = String(TRIOE_JOYSTICK_STREAM);
+    String joystickXStream = joystickBase + "_x";
+    String joystickYStream = joystickBase + "_y";
+    String xValue = "";
+    String yValue = "";
+    String commandUpdateToken = "";
+    String commandAckValue = "";
+    String commandAckToken = "";
+
+    for (JsonObject stream : doc.as<JsonArray>()) {
+      const char* name = stream["name"] | "";
+      JsonVariant value = stream["current_value"];
+      if (strcmp(name, TRIOE_COMMAND_STREAM) == 0) {
+        commandValue = value.as<String>();
+        if (!stream["last_updated"].isNull()) {
+          commandUpdateToken = stream["last_updated"].as<String>();
+        } else if (!stream["stream_id"].isNull()) {
+          commandUpdateToken = stream["stream_id"].as<String>();
+        }
+      } else if (strcmp(name, commandNonceStream.c_str()) == 0) {
+        commandUpdateToken = value.as<String>();
+      } else if (strcmp(name, commandAckStream.c_str()) == 0) {
+        commandAckValue = value.as<String>();
+      } else if (strcmp(name, commandAckNonceStream.c_str()) == 0) {
+        commandAckToken = value.as<String>();
+      } else if (strcmp(name, joystickXStream.c_str()) == 0) {
+        xValue = value.as<String>();
+      } else if (strcmp(name, joystickYStream.c_str()) == 0) {
+        yValue = value.as<String>();
+      }
+    }
+
+    if (ENABLE_TRIOE_POLL_VALUE_PRINTS) {
+      String snapshot = commandValue + "|" + commandUpdateToken + "|" + commandAckValue + "|" + commandAckToken + "|" + xValue + "|" + yValue;
+      if (snapshot != lastTrioePollDebugSnapshot) {
+        Serial.print(F("Trioe parsed: command='"));
+        Serial.print(commandValue.length() ? commandValue : "(empty)");
+        Serial.print(F("' token="));
+        Serial.print(commandUpdateToken.length() ? commandUpdateToken : "(none)");
+        Serial.print(F(" ack='"));
+        Serial.print(commandAckValue.length() ? commandAckValue : "(empty)");
+        Serial.print(F("' ackToken="));
+        Serial.print(commandAckToken.length() ? commandAckToken : "(none)");
+        Serial.print(F(" joystick=("));
+        Serial.print(xValue.length() ? xValue : "?");
+        Serial.print(F(","));
+        Serial.print(yValue.length() ? yValue : "?");
+        Serial.print(F(") pollMs="));
+        Serial.println(millis() - pollStartMs);
+        lastTrioePollDebugSnapshot = snapshot;
+      }
+    }
+
+    if (xValue.length() > 0 && yValue.length() > 0) {
+      applyTrioeJoystick(xValue.toInt(), yValue.toInt());
+    }
+
+    if (commandValue.length() > 0 &&
+        !(commandValue == commandAckValue && commandUpdateToken.length() > 0 && commandUpdateToken == commandAckToken)) {
+      applyTrioeCommand(commandValue, commandUpdateToken);
+    } else if (ENABLE_TRIOE_DEBUG_PRINTS && commandValue.length() > 0 && commandValue == commandAckValue) {
+      String ackedDebugKey = commandValue + "@" + commandUpdateToken;
+      if (ackedDebugKey != lastTrioeDuplicateDebugKey) {
+        Serial.print(F("Trioe command already acked: "));
+        Serial.print(commandValue);
+        Serial.print(F(" token="));
+        Serial.println(commandUpdateToken.length() ? commandUpdateToken : "(none)");
+        lastTrioeDuplicateDebugKey = ackedDebugKey;
+      }
+    }
+  } else {
+    if (statusCode < 0 || statusCode >= 500) {
+      trioePollBackoffUntilMs = millis() + TRIOE_FAILURE_BACKOFF_MS;
+    }
+    if (statusCode != lastTrioePollErrorStatus || millis() - lastTrioePollErrorPrintMs >= 5000) {
+      Serial.print(F("Trioe poll HTTP "));
+      Serial.println(statusCode);
+      lastTrioePollErrorStatus = statusCode;
+      lastTrioePollErrorPrintMs = millis();
+    }
+  }
+
+  trioePollInProgress = false;
+}
+
+void acknowledgeTrioeCommandComplete(const String& command, const String& updateToken) {
+  if (!ENABLE_TRIOE_HUB_CONTROL || !networkConnected || WiFi.status() != WL_CONNECTED) return;
+  if (command.length() == 0 || isContinuousMovementCommand(command)) return;
+
+  String ackToken = updateToken.length() > 0 ? updateToken : String(millis());
+  String payload = String("{\"updateCurrent\":true,\"streams\":[") +
+    "{\"name\":\"" + String(TRIOE_COMMAND_STREAM) + "\",\"type\":\"string\",\"value\":\"done\",\"unit\":\"command\"}," +
+    "{\"name\":\"" + String(TRIOE_COMMAND_STREAM) + "_ack\",\"type\":\"string\",\"value\":\"" + command + "\",\"unit\":\"command\"}," +
+    "{\"name\":\"" + String(TRIOE_COMMAND_STREAM) + "_ack_nonce\",\"type\":\"number\",\"value\":" + ackToken + ",\"unit\":\"ms\"}" +
+    "]}";
+
+  int statusCode = trioeHttpPost(TRIOE_HUB_POST_URL, payload, TRIOE_ACK_TIMEOUT_MS);
+
+  if (ENABLE_TRIOE_DEBUG_PRINTS) {
+    Serial.print(F("Trioe command ack/clear: "));
+    Serial.print(command);
+    Serial.print(F(" HTTP "));
+    Serial.println(statusCode);
+  }
+}
+
+void applyTrioeCommand(const String& commandValue, const String& updateToken) {
+  String command = normalizeTrioeCommand(commandValue);
+  if (!isSesameCommand(command)) {
+    if (ENABLE_TRIOE_DEBUG_PRINTS) {
+      Serial.print(F("Trioe command ignored, unknown raw='"));
+      Serial.print(commandValue);
+      Serial.println(F("'"));
+    }
+    return;
+  }
+
+  if (command == lastTrioeCommandValue && !isContinuousMovementCommand(command) && updateToken == lastTrioeCommandUpdateToken) {
+    String duplicateDebugKey = command + "@" + updateToken;
+    if (ENABLE_TRIOE_DEBUG_PRINTS) {
+      if (duplicateDebugKey != lastTrioeDuplicateDebugKey) {
+        Serial.print(F("Trioe command duplicate ignored: "));
+        Serial.print(command);
+        Serial.print(F(" token="));
+        Serial.println(updateToken.length() ? updateToken : "(none)");
+        lastTrioeDuplicateDebugKey = duplicateDebugKey;
+      }
+    }
+    return;
+  }
+  lastTrioeCommandValue = command;
+  lastTrioeCommandUpdateToken = updateToken;
+  lastTrioeDuplicateDebugKey = "";
+  lastTrioeJoystickCommand = "";
+
+  recordInput();
+
+  if (command == "stop") {
+    currentCommand = "";
+    currentCommandUpdateToken = "";
+    return;
+  }
+
+  currentCommand = command;
+  currentCommandUpdateToken = updateToken;
+  exitIdle();
+  Serial.print(F("Trioe command queued: raw='"));
+  Serial.print(commandValue);
+  Serial.print(F("' normalized='"));
+  Serial.print(command);
+  Serial.print(F("' token="));
+  Serial.println(updateToken.length() ? updateToken : "(none)");
+  Serial.print(F("Trioe command: "));
+  Serial.println(command);
+}
+
+void applyTrioeJoystick(int x, int y) {
+  String command = "";
+  int absX = abs(x);
+  int absY = abs(y);
+
+  if (absX < TRIOE_JOYSTICK_DEADZONE && absY < TRIOE_JOYSTICK_DEADZONE) {
+    command = "stop";
+  } else if (absX > absY) {
+    command = x > 0 ? "right" : "left";
+  } else {
+    command = y > 0 ? "forward" : "backward";
+  }
+
+  if (command == lastTrioeJoystickCommand) return;
+  lastTrioeJoystickCommand = command;
+
+  recordInput();
+
+  if (command == "stop") {
+    if (isContinuousMovementCommand(currentCommand)) {
+      if (ENABLE_TRIOE_DEBUG_PRINTS) {
+        Serial.print(F("Trioe joystick center stopping movement: "));
+        Serial.println(currentCommand);
+      }
+      currentCommand = "";
+      currentCommandUpdateToken = "";
+    } else if (ENABLE_TRIOE_DEBUG_PRINTS && currentCommand.length() > 0) {
+      Serial.print(F("Trioe joystick center ignored while command pending: "));
+      Serial.println(currentCommand);
+    }
+  } else {
+    currentCommand = command;
+    currentCommandUpdateToken = "";
+    exitIdle();
+  }
+
+  Serial.print(F("Trioe joystick: "));
+  Serial.print(x);
+  Serial.print(F(", "));
+  Serial.print(y);
+  Serial.print(F(" -> "));
+  Serial.println(command);
+}
+
+String normalizeTrioeCommand(String value) {
+  value.trim();
+  value.toLowerCase();
+  value.replace("_", "");
+  value.replace("-", "");
+  value.replace(" ", "");
+
+  if (value == "walk" || value == "go" || value == "up") return "forward";
+  if (value == "down" || value == "reverse") return "backward";
+  if (value == "turnleft") return "left";
+  if (value == "turnright") return "right";
+  if (value == "pushups") return "pushup";
+  if (value == "stop" || value == "center" || value == "idle") return "stop";
+  return value;
+}
+
+bool isSesameCommand(const String& command) {
+  return command == "forward" ||
+         command == "backward" ||
+         command == "left" ||
+         command == "right" ||
+         command == "stop" ||
+         command == "rest" ||
+         command == "stand" ||
+         command == "wave" ||
+         command == "dance" ||
+         command == "swim" ||
+         command == "point" ||
+         command == "pushup" ||
+         command == "bow" ||
+         command == "cute" ||
+         command == "freaky" ||
+         command == "worm" ||
+         command == "shake" ||
+         command == "shrug" ||
+         command == "dead" ||
+         command == "crab";
+}
+
+bool isContinuousMovementCommand(const String& command) {
+  return command == "forward" ||
+         command == "backward" ||
+         command == "left" ||
+         command == "right";
+}
+
+bool shouldPollTrioeDuringDelays() {
+  if (executingCommand.length() > 0) {
+    return isContinuousMovementCommand(executingCommand);
+  }
+  return currentCommand.length() == 0 || isContinuousMovementCommand(currentCommand);
+}
+
 void recordInput() {
   lastInputTime = millis();
   if (!firstInputReceived) {
@@ -851,7 +1438,52 @@ void recordInput() {
   }
 }
 
+void serviceLocalRemote() {
+  if (!localRemoteEnabled) return;
+
+  server.handleClient();
+  dnsServer.processNextRequest();
+}
+
+void maintainNetworkConnection() {
+  if (!ENABLE_NETWORK_MODE || String(NETWORK_SSID).length() == 0) return;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!networkConnected) {
+      networkConnected = true;
+      networkIP = WiFi.localIP();
+      Serial.print(F("Network reconnected! IP: "));
+      Serial.println(networkIP);
+
+      if (ENABLE_TRIOE_HUB_CONTROL && DISABLE_HOTSPOT_WHEN_TRIOE_CONNECTED) {
+        localRemoteEnabled = false;
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+        wifiInfoText = "Network: " + String(NETWORK_SSID) + " (" + networkIP.toString() + ")  |  Trioe Hub control active  |  ";
+        Serial.println(F("Trioe Hub connected mode: hotspot, captive portal, and local remote disabled."));
+      }
+    }
+    return;
+  }
+
+  if (networkConnected) {
+    networkConnected = false;
+    Serial.println(F("Network lost. Trioe polling paused until reconnect."));
+  }
+
+  unsigned long now = millis();
+  if (now - lastNetworkRetryMs < 5000) return;
+  lastNetworkRetryMs = now;
+
+  Serial.print(F("Retrying network: "));
+  Serial.println(NETWORK_SSID);
+  WiFi.mode(localRemoteEnabled ? WIFI_AP_STA : WIFI_STA);
+  WiFi.setHostname(deviceHostname.c_str());
+  WiFi.begin(NETWORK_SSID, NETWORK_PASS);
+}
+
 void updateWifiInfoScroll() {
+  if (!displayReady) return;
   // Don't show WiFi info if first input has been received
   if (firstInputReceived) {
     if (showingWifiInfo) {
@@ -884,15 +1516,15 @@ void updateWifiInfoScroll() {
     
     // Draw the face bitmap in the background
     if (currentFaceFrames != nullptr && currentFaceFrameCount > 0) {
-      display.drawBitmap(0, 0, currentFaceFrames[currentFaceFrameIndex], 128, 64, SSD1306_WHITE);
+      drawFaceBitmap(currentFaceFrames[currentFaceFrameIndex]);
     }
     
     // Draw black bar for text background on top row
-    display.fillRect(0, 0, 128, 10, SSD1306_BLACK);
+    display.fillRect(0, 0, SCREEN_WIDTH, 10, SSD1327_BLACK);
     
     // Draw scrolling text
     display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
+    display.setTextColor(SSD1327_WHITE);
     display.setTextWrap(false);
     display.setCursor(-wifiScrollPos, 1);
     display.print(wifiInfoText);

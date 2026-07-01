@@ -76,6 +76,7 @@ inline void runRestPose() {
 
 inline void runStandPose(int face) { 
   Serial.println(F("STAND")); 
+  Serial.println(F("STAND: applying leg/hip servo targets"));
   if (face == 1) setFaceWithMode("stand", FACE_ANIM_ONCE); 
   setServoAngle(R1, 135); 
   setServoAngle(R2, 45); 
@@ -85,24 +86,32 @@ inline void runStandPose(int face) {
   setServoAngle(R3, 180); 
   setServoAngle(L3, 0); 
   setServoAngle(L4, 180); 
+  Serial.println(F("STAND: servo targets sent"));
   if (face == 1) enterIdle();
 }
 
 inline void runWavePose() { 
   Serial.println(F("WAVE")); 
+  Serial.println(F("WAVE: start"));
   setFaceWithMode("wave", FACE_ANIM_ONCE); 
+  Serial.println(F("WAVE: prep stand"));
   runStandPose(0); 
   delayWithFace(200);
+  Serial.println(F("WAVE: arm lift"));
   setServoAngle(R4, 80); setServoAngle(L3, 180); 
   setServoAngle(L2, 90); setServoAngle(R1, 100); 
   delayWithFace(200);
   setServoAngle(L3, 180); 
   delayWithFace(300); 
   for (int i = 0; i < 4; i++) { 
+    Serial.print(F("WAVE: sweep "));
+    Serial.println(i + 1);
     setServoAngle(L3, 180); delayWithFace(300); 
     setServoAngle(L3, 100); delayWithFace(300); 
   } 
+  Serial.println(F("WAVE: return stand"));
   runStandPose(1); 
+  Serial.println(F("WAVE: complete"));
   if (currentCommand == "wave") currentCommand = "";
 }
 

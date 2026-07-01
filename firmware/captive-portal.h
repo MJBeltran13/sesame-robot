@@ -818,9 +818,9 @@ function centerAllMotors() {
 
 function openSettings() {
   fetch('/getSettings').then(r => r.json()).then(data => {
-    document.getElementById('frameDelay').value = data.frameDelay || 100;
+    document.getElementById('frameDelay').value = data.frameDelay || 60;
     document.getElementById('walkCycles').value = data.walkCycles || 10;
-    document.getElementById('motorCurrentDelay').value = data.motorCurrentDelay || 20;
+    document.getElementById('motorCurrentDelay').value = data.motorCurrentDelay || 8;
     document.getElementById('motorSpeed').value = data.motorSpeed || 'medium';
     const defaultPins = [4, 5, 6, 7, 35, 36, 37, 38];
     const pins = Array.isArray(data.servoPins) ? data.servoPins : defaultPins;
@@ -852,9 +852,9 @@ function openSettings() {
     document.getElementById('settingsPanel').style.display = 'block';
   }).catch(() => {
     // Fallback if settings endpoint doesn't exist yet
-    document.getElementById('frameDelay').value = 100;
+    document.getElementById('frameDelay').value = 60;
     document.getElementById('walkCycles').value = 10;
-    document.getElementById('motorCurrentDelay').value = 20;
+    document.getElementById('motorCurrentDelay').value = 8;
     [4, 5, 6, 7, 35, 36, 37, 38].forEach((pin, index) => {
       document.getElementById('pin' + (index + 1)).value = pin;
     });

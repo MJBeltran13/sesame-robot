@@ -1,1 +1,42 @@
-.vscode/launch.json
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# PlatformIO build and dependency caches
+.pio/
+firmware/.pio/
+**/.pio/
+
+# Build outputs
+*.bin
+*.elf
+*.map
+*.hex
+*.uf2
+*.o
+*.d
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Local device/debug captures and generated mobile artifacts
+*.ipa
+*.mobileprovision
+*.pem
+*embedded*.plist
+*entitlements*.plist
+*-screen*.png
+*current*.png
+*after*.png
+*check*.png
+*window*.png
+*plume*.png
+ios-crashlogs*/
+iphone-provisions/
+melonx-logs-current/
+stikdebug-*/
+stikdebug-prefs.plist
+melonx-config*.json
