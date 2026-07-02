@@ -9,7 +9,18 @@
 #include <ESP32Servo.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1327.h>
-#include "face-bitmaps.h"
+#include "generated-oled-art/headers/sesame-face-default.h"
+#include "generated-oled-art/headers/sesame-face-happy.h"
+#include "generated-oled-art/headers/sesame-face-sad.h"
+#include "generated-oled-art/headers/sesame-face-angry.h"
+#include "generated-oled-art/headers/sesame-face-surprised.h"
+#include "generated-oled-art/headers/sesame-face-sleepy.h"
+#include "generated-oled-art/headers/sesame-face-love.h"
+#include "generated-oled-art/headers/sesame-face-confused.h"
+#include "generated-oled-art/headers/sesame-face-thinking.h"
+#include "generated-oled-art/headers/sesame-face-excited.h"
+#include "generated-oled-art/headers/sesame-face-dead.h"
+#include "generated-oled-art/headers/sesame-face-wink.h"
 #include "movement-sequences.h"
 #include "captive-portal.h"
 
@@ -47,6 +58,9 @@
 #define SCREEN_HEIGHT 128
 #define FACE_BITMAP_WIDTH 128
 #define FACE_BITMAP_HEIGHT 128
+#define DISPLAY_ROTATION 3
+#define FACE_BITMAP_INVERT false
+#define DISPLAY_SEG_REMAP 0x53
 #define OLED_RESET -1
 #define OLED_I2C_ADDR 0x3C
 
@@ -167,22 +181,64 @@ struct FaceEntry {
 
 static const uint8_t MAX_FACE_FRAMES = 6;
 
-#define MAKE_FACE_FRAMES(name) \
-  const unsigned char* const face_##name##_frames[] = { \
-    epd_bitmap_##name, epd_bitmap_##name##_1, epd_bitmap_##name##_2, \
-    epd_bitmap_##name##_3, epd_bitmap_##name##_4, epd_bitmap_##name##_5 \
+#define MAKE_GENERATED_FACE_FRAMES(name) \
+  const unsigned char* const face_gen_##name##_frames[] = { \
+    epd_bitmap_gen_##name, nullptr, nullptr, nullptr, nullptr, nullptr \
   };
 
-#define X(name) MAKE_FACE_FRAMES(name)
-FACE_LIST
-#undef X
-#undef MAKE_FACE_FRAMES
+MAKE_GENERATED_FACE_FRAMES(default)
+MAKE_GENERATED_FACE_FRAMES(happy)
+MAKE_GENERATED_FACE_FRAMES(sad)
+MAKE_GENERATED_FACE_FRAMES(angry)
+MAKE_GENERATED_FACE_FRAMES(surprised)
+MAKE_GENERATED_FACE_FRAMES(sleepy)
+MAKE_GENERATED_FACE_FRAMES(love)
+MAKE_GENERATED_FACE_FRAMES(confused)
+MAKE_GENERATED_FACE_FRAMES(thinking)
+MAKE_GENERATED_FACE_FRAMES(excited)
+MAKE_GENERATED_FACE_FRAMES(dead)
+MAKE_GENERATED_FACE_FRAMES(wink)
+#undef MAKE_GENERATED_FACE_FRAMES
 
 const FaceEntry faceEntries[] = {
-#define X(name) { #name, face_##name##_frames, MAX_FACE_FRAMES },
-  FACE_LIST
-#undef X
-  { "default", face_defualt_frames, MAX_FACE_FRAMES }
+  { "default", face_gen_default_frames, MAX_FACE_FRAMES },
+  { "happy", face_gen_happy_frames, MAX_FACE_FRAMES },
+  { "talk_happy", face_gen_happy_frames, MAX_FACE_FRAMES },
+  { "sad", face_gen_sad_frames, MAX_FACE_FRAMES },
+  { "talk_sad", face_gen_sad_frames, MAX_FACE_FRAMES },
+  { "angry", face_gen_angry_frames, MAX_FACE_FRAMES },
+  { "talk_angry", face_gen_angry_frames, MAX_FACE_FRAMES },
+  { "surprised", face_gen_surprised_frames, MAX_FACE_FRAMES },
+  { "talk_surprised", face_gen_surprised_frames, MAX_FACE_FRAMES },
+  { "sleepy", face_gen_sleepy_frames, MAX_FACE_FRAMES },
+  { "talk_sleepy", face_gen_sleepy_frames, MAX_FACE_FRAMES },
+  { "love", face_gen_love_frames, MAX_FACE_FRAMES },
+  { "talk_love", face_gen_love_frames, MAX_FACE_FRAMES },
+  { "confused", face_gen_confused_frames, MAX_FACE_FRAMES },
+  { "talk_confused", face_gen_confused_frames, MAX_FACE_FRAMES },
+  { "thinking", face_gen_thinking_frames, MAX_FACE_FRAMES },
+  { "talk_thinking", face_gen_thinking_frames, MAX_FACE_FRAMES },
+  { "excited", face_gen_excited_frames, MAX_FACE_FRAMES },
+  { "talk_excited", face_gen_excited_frames, MAX_FACE_FRAMES },
+  { "dead", face_gen_dead_frames, MAX_FACE_FRAMES },
+  { "wink", face_gen_wink_frames, MAX_FACE_FRAMES },
+  { "rest", face_gen_default_frames, MAX_FACE_FRAMES },
+  { "stand", face_gen_default_frames, MAX_FACE_FRAMES },
+  { "idle", face_gen_default_frames, MAX_FACE_FRAMES },
+  { "idle_blink", face_gen_wink_frames, MAX_FACE_FRAMES },
+  { "walk", face_gen_happy_frames, MAX_FACE_FRAMES },
+  { "wave", face_gen_wink_frames, MAX_FACE_FRAMES },
+  { "dance", face_gen_excited_frames, MAX_FACE_FRAMES },
+  { "swim", face_gen_happy_frames, MAX_FACE_FRAMES },
+  { "point", face_gen_confused_frames, MAX_FACE_FRAMES },
+  { "pushup", face_gen_excited_frames, MAX_FACE_FRAMES },
+  { "bow", face_gen_sleepy_frames, MAX_FACE_FRAMES },
+  { "cute", face_gen_love_frames, MAX_FACE_FRAMES },
+  { "freaky", face_gen_surprised_frames, MAX_FACE_FRAMES },
+  { "worm", face_gen_confused_frames, MAX_FACE_FRAMES },
+  { "shake", face_gen_surprised_frames, MAX_FACE_FRAMES },
+  { "shrug", face_gen_confused_frames, MAX_FACE_FRAMES },
+  { "crab", face_gen_angry_frames, MAX_FACE_FRAMES }
 };
 
 struct FaceFpsEntry {
@@ -251,6 +307,7 @@ void handleSetSettings();
 void handleGetStatus();
 void handleApiCommand();
 bool beginSsd1327Display();
+void runDisplayPowerOnTest();
 void showDisplayBootDiagnostic();
 void pollTrioeHub();
 int trioeHttpGet(const String& url, String& response, uint16_t timeoutMs);
@@ -432,77 +489,36 @@ void handleApiCommand() {
 }
 
 bool beginSsd1327Display() {
-  struct I2cPins {
-    int sda;
-    int scl;
-  };
+  activeI2cSda = I2C_SDA;
+  activeI2cScl = I2C_SCL;
+  activeOledAddr = OLED_I2C_ADDR;
 
-  const I2cPins pinCandidates[] = {
-    { I2C_SDA, I2C_SCL },
-    { I2C_SCL, I2C_SDA },
-    { 8, 9 }
-  };
-  const uint8_t addrCandidates[] = { OLED_I2C_ADDR, 0x3C, 0x3D };
+  pinMode(activeI2cSda, INPUT_PULLUP);
+  pinMode(activeI2cScl, INPUT_PULLUP);
+  Wire.begin(activeI2cSda, activeI2cScl);
+  Wire.setClock(100000);
+  Wire.setTimeOut(20);
 
-  for (uint8_t p = 0; p < sizeof(pinCandidates) / sizeof(pinCandidates[0]); p++) {
-    bool duplicatePins = false;
-    for (uint8_t previous = 0; previous < p; previous++) {
-      if (pinCandidates[p].sda == pinCandidates[previous].sda &&
-          pinCandidates[p].scl == pinCandidates[previous].scl) {
-        duplicatePins = true;
-        break;
-      }
-    }
-    if (duplicatePins) continue;
+  Serial.print(F("SSD1327 I2C SDA="));
+  Serial.print(activeI2cSda);
+  Serial.print(F(" SCL="));
+  Serial.print(activeI2cScl);
+  Serial.print(F(" ADDR=0x"));
+  if (activeOledAddr < 16) Serial.print("0");
+  Serial.println(activeOledAddr, HEX);
 
-    activeI2cSda = pinCandidates[p].sda;
-    activeI2cScl = pinCandidates[p].scl;
-    pinMode(activeI2cSda, INPUT_PULLUP);
-    pinMode(activeI2cScl, INPUT_PULLUP);
-    Wire.end();
-    Wire.begin(activeI2cSda, activeI2cScl);
-    Wire.setClock(100000);
-    Wire.setTimeOut(20);
-
-    Serial.print(F("Trying SSD1327 I2C SDA="));
-    Serial.print(activeI2cSda);
-    Serial.print(F(" SCL="));
-    Serial.println(activeI2cScl);
-
-    for (uint8_t a = 0; a < sizeof(addrCandidates); a++) {
-      uint8_t addr = addrCandidates[a];
-      bool duplicateAddr = false;
-      for (uint8_t previous = 0; previous < a; previous++) {
-        if (addr == addrCandidates[previous]) {
-          duplicateAddr = true;
-          break;
-        }
-      }
-      if (duplicateAddr) continue;
-
-      Wire.beginTransmission(addr);
-      uint8_t error = Wire.endTransmission();
-      if (error != 0) continue;
-
-      Serial.print(F("I2C device found at 0x"));
-      if (addr < 16) Serial.print("0");
-      Serial.println(addr, HEX);
-
-      activeOledAddr = addr;
-      if (display.begin(activeOledAddr)) {
-        display.invertDisplay(false);
-        display.clearDisplay();
-        display.display();
-        return true;
-      }
-
-      Serial.print(F("SSD1327 begin failed at 0x"));
-      if (activeOledAddr < 16) Serial.print("0");
-      Serial.println(activeOledAddr, HEX);
-    }
+  if (!display.begin(activeOledAddr)) {
+    Serial.println(F("SSD1327 begin failed."));
+    return false;
   }
 
-  return false;
+  display.setRotation(DISPLAY_ROTATION);
+  display.oled_command(SSD1327_SEGREMAP);
+  display.oled_command(DISPLAY_SEG_REMAP);
+  display.invertDisplay(false);
+  display.clearDisplay();
+  display.display();
+  return true;
 }
 
 void showDisplayBootDiagnostic() {
@@ -512,6 +528,10 @@ void showDisplayBootDiagnostic() {
   display.setTextColor(SSD1327_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
+  display.println(F("Hello, World!"));
+  display.println(F("128x128 OLED"));
+  display.println(F("Grayscale Display"));
+  display.println();
   display.println(F("SSD1327 OK"));
   display.print(F("SDA "));
   display.print(activeI2cSda);
@@ -520,11 +540,40 @@ void showDisplayBootDiagnostic() {
   display.print(F("ADDR 0x"));
   if (activeOledAddr < 16) display.print("0");
   display.println(activeOledAddr, HEX);
-  display.drawRect(0, 34, SCREEN_WIDTH, 58, SSD1327_WHITE);
-  display.drawCircle(64, 64, 20, SSD1327_WHITE);
-  display.fillCircle(64, 64, 6, SSD1327_WHITE);
+  display.display();
+  delay(1200);
+}
+
+void runDisplayPowerOnTest() {
+  if (!displayReady) return;
+
+  display.clearDisplay();
+  display.fillScreen(SSD1327_WHITE);
   display.display();
   delay(700);
+
+  display.clearDisplay();
+  display.fillScreen(SSD1327_BLACK);
+  display.display();
+  delay(700);
+
+  display.clearDisplay();
+  for (int x = 0; x < SCREEN_WIDTH; x += 16) {
+    display.fillRect(x, 0, 8, SCREEN_HEIGHT, SSD1327_WHITE);
+  }
+  display.display();
+  delay(700);
+
+  display.clearDisplay();
+  for (int y = 0; y < SCREEN_HEIGHT; y += 16) {
+    display.fillRect(0, y, SCREEN_WIDTH, 8, SSD1327_WHITE);
+  }
+  display.display();
+  delay(700);
+
+  display.clearDisplay();
+  display.display();
+  delay(200);
 }
 
 void setup() {
@@ -549,6 +598,7 @@ void setup() {
     Serial.print(F(" SCL="));
     Serial.println(activeI2cScl);
 
+    runDisplayPowerOnTest();
     showDisplayBootDiagnostic();
     showWifiSetupScreen();
   }
@@ -824,7 +874,9 @@ void loop() {
 
 void drawFaceBitmap(const unsigned char* bitmap) {
   if (bitmap == nullptr) return;
-  display.drawBitmap(0, 0, bitmap, FACE_BITMAP_WIDTH, FACE_BITMAP_HEIGHT, SSD1327_WHITE);
+  const uint16_t foreground = FACE_BITMAP_INVERT ? SSD1327_BLACK : SSD1327_WHITE;
+  const uint16_t background = FACE_BITMAP_INVERT ? SSD1327_WHITE : SSD1327_BLACK;
+  display.drawBitmap(0, 0, bitmap, FACE_BITMAP_WIDTH, FACE_BITMAP_HEIGHT, foreground, background);
 }
 
 void drawWifiBlockWord(int x, int y) {
@@ -857,23 +909,45 @@ void drawWifiBlockWord(int x, int y) {
   display.fillRect(x, y + h - t, 18, t, SSD1327_WHITE);
 }
 
+void drawThickArc(int cx, int cy, int radius, int stroke, int startDeg, int endDeg, uint16_t color) {
+  int dotRadius = max(1, stroke / 2);
+  for (int angle = startDeg; angle <= endDeg; angle += 2) {
+    float rad = angle * PI / 180.0f;
+    int x = cx + (int)round(cos(rad) * radius);
+    int y = cy + (int)round(sin(rad) * radius);
+    display.fillCircle(x, y, dotRadius, color);
+  }
+}
+
+void drawWifiSetupBitmap() {
+  const int cx = 64;
+
+  display.drawRoundRect(16, 22, 96, 82, 14, SSD1327_WHITE);
+  display.drawRoundRect(17, 23, 94, 80, 13, SSD1327_WHITE);
+  display.drawRoundRect(18, 24, 92, 78, 12, SSD1327_WHITE);
+
+  display.fillRoundRect(48, 14, 32, 8, 3, SSD1327_WHITE);
+  display.fillRect(61, 5, 6, 12, SSD1327_WHITE);
+  display.fillCircle(cx, 5, 7, SSD1327_WHITE);
+
+  display.fillRoundRect(8, 52, 8, 28, 3, SSD1327_WHITE);
+  display.fillRoundRect(112, 52, 8, 28, 3, SSD1327_WHITE);
+
+  drawThickArc(cx, 76, 35, 6, 215, 325, SSD1327_WHITE);
+  drawThickArc(cx, 76, 24, 6, 220, 320, SSD1327_WHITE);
+  drawThickArc(cx, 76, 13, 6, 230, 310, SSD1327_WHITE);
+  display.fillCircle(cx, 80, 5, SSD1327_WHITE);
+
+  display.fillRoundRect(32, 112, 18, 8, 3, SSD1327_WHITE);
+  display.fillRoundRect(55, 112, 18, 8, 3, SSD1327_WHITE);
+  display.fillRoundRect(78, 112, 18, 8, 3, SSD1327_WHITE);
+}
+
 void showWifiSetupScreen() {
   if (!displayReady) return;
 
   display.clearDisplay();
-
-  const int cx = 64;
-  const int cy = 58;
-  for (int r = 30; r >= 12; r -= 9) {
-    for (int stroke = 0; stroke < 3; stroke++) {
-      display.drawCircle(cx, cy, r - stroke, SSD1327_WHITE);
-    }
-  }
-  display.fillRect(0, cy + 1, SCREEN_WIDTH, 40, SSD1327_BLACK);
-  display.fillCircle(cx, cy + 6, 4, SSD1327_WHITE);
-
-  drawWifiBlockWord(20, 82);
-
+  drawWifiSetupBitmap();
   display.display();
 }
 
@@ -905,8 +979,8 @@ void setFace(const String& faceName) {
   faceAnimFinished = false;
   currentFaceFps = getFaceFpsForName(faceName);
 
-  currentFaceFrames = face_defualt_frames;
-  currentFaceFrameCount = countFrames(face_defualt_frames, MAX_FACE_FRAMES);
+  currentFaceFrames = face_gen_default_frames;
+  currentFaceFrameCount = countFrames(face_gen_default_frames, MAX_FACE_FRAMES);
 
   for (size_t i = 0; i < (sizeof(faceEntries) / sizeof(faceEntries[0])); i++) {
     if (faceName.equalsIgnoreCase(faceEntries[i].name)) {
@@ -917,8 +991,8 @@ void setFace(const String& faceName) {
   }
 
   if (currentFaceFrameCount == 0) {
-    currentFaceFrames = face_defualt_frames;
-    currentFaceFrameCount = countFrames(face_defualt_frames, MAX_FACE_FRAMES);
+    currentFaceFrames = face_gen_default_frames;
+    currentFaceFrameCount = countFrames(face_gen_default_frames, MAX_FACE_FRAMES);
     currentFaceName = "default";
     currentFaceFps = getFaceFpsForName(currentFaceName);
   }
